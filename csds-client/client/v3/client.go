@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	envoy_config_core_v3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	csdspb_v3 "github.com/envoyproxy/go-control-plane/envoy/service/status/v3"
 	envoy_type_matcher_v3 "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"google.golang.org/grpc"
@@ -180,7 +181,7 @@ func (c *ClientV3) Run() error {
 // doRequest sends request and prints out the parsed response
 func (c *ClientV3) doRequest(streamClientStatus csdspb_v3.ClientStatusDiscoveryService_StreamClientStatusClient) error {
 
-	req := &csdspb_v3.ClientStatusRequest{NodeMatchers: c.nodeMatcher}
+	req := &csdspb_v3.ClientStatusRequest{NodeMatchers: c.nodeMatcher, Node: &envoy_config_core_v3.Node{Id: "mannappa2-macbook"}}
 	if err := streamClientStatus.Send(req); err != nil {
 		return err
 	}
@@ -198,20 +199,21 @@ func (c *ClientV3) doRequest(streamClientStatus csdspb_v3.ClientStatusDiscoveryS
 }
 
 // parseConfigStatus parses each xds config status to string
-func parseConfigStatus(xdsConfig []*csdspb_v3.PerXdsConfig) []string {
+func parseConfigStatus(xdsConfig []*csdspb_v3.ClientConfig_GenericXdsConfig) []string {
 	var configStatus []string
-	for _, perXdsConfig := range xdsConfig {
-		status := perXdsConfig.GetStatus().String()
+	for _, genericXdsConfig := range xdsConfig {
+		status := genericXdsConfig.GetConfigStatus().String()
 		var xds string
-		if perXdsConfig.GetClusterConfig() != nil {
+		switch genericXdsConfig.GetTypeUrl() {
+		case "type.googleapis.com/envoy.config.cluster.v3.Cluster":
 			xds = "CDS"
-		} else if perXdsConfig.GetListenerConfig() != nil {
+		case "type.googleapis.com/envoy.config.listener.v3.Listener":
 			xds = "LDS"
-		} else if perXdsConfig.GetRouteConfig() != nil {
+		case "type.googleapis.com/envoy.config.route.v3.RouteConfiguration":
 			xds = "RDS"
-		} else if perXdsConfig.GetScopedRouteConfig() != nil {
+		case "type.googleapis.com/envoy.config.route.v3.ScopedRouteConfiguration":
 			xds = "SRDS"
-		} else if perXdsConfig.GetEndpointConfig() != nil {
+		case "type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment":
 			xds = "EDS"
 		}
 		if status != "" && xds != "" {
@@ -257,7 +259,7 @@ func printOutResponse(response *csdspb_v3.ClientStatusResponse, opts client.Clie
 			}
 		}
 
-		if config.GetXdsConfig() == nil {
+		if config.GetGenericXdsConfigs() == nil {
 			if config.GetNode() != nil {
 				fmt.Printf("%-50s %-30s %-30s \n", id, xdsType, "N/A")
 			}
@@ -265,7 +267,7 @@ func printOutResponse(response *csdspb_v3.ClientStatusResponse, opts client.Clie
 			hasXdsConfig = true
 
 			// parse config status
-			configStatus := parseConfigStatus(config.GetXdsConfig())
+			configStatus := parseConfigStatus(config.GetGenericXdsConfigs())
 			fmt.Printf("%-50s %-30s ", id, xdsType)
 
 			for i := 0; i < len(configStatus); i++ {
